@@ -283,10 +283,14 @@ using the formula: HIGH * 2**16 + LOW + MICRO * 10**-6 + PICO * 10**-12."
         (data (msgpack-read-bytes data-len)))
     (pcase (list type data-len)
       ('(-1 4) (seconds-to-time (msgpack-bytes-to-unsigned data)))
-      ('(-1 8) (let* ((bits (msgpack-bytes-to-bits data))
-                      (nanoseconds (msgpack-bits-to-unsigned (cl-subseq bits 0 30)))
-                      (seconds (msgpack-bits-to-unsigned (cl-subseq bits 30))))
-                 (msgpack-seconds-to-time seconds nanoseconds)))
+      ('(-1 8) (let* ((hi (msgpack-bytes-to-unsigned (substring data 0 4)))
+                      (lo (msgpack-bytes-to-unsigned (substring data 4 8))))
+                 ;; bits 0-29 hold the nanoseconds, 30-63 the seconds;
+                 ;; split hi/lo to avoid values above 2^32, which do not
+                 ;; fit in fixnums on Emacsen without bignum support
+                 (msgpack-seconds-to-time
+                  (logior (ash (logand hi 3) 32) lo)
+                  (ash hi -2))))
       ('(-1 12) (let ((nanoseconds (msgpack-bytes-to-unsigned (substring data 0 4)))
                       (seconds (msgpack-bytes-to-signed (substring data 4))))
                   (msgpack-seconds-to-time seconds nanoseconds)))

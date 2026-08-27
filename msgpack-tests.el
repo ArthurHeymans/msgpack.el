@@ -462,6 +462,7 @@
 
   ;; $ gdate +%s:%N
   ;; 1584216254:357957000
+  ;; bits 0-29 hold the nanoseconds, 30-63 the seconds
   (let ((seconds 1584216254)
         (nanoseconds 357957000))
     (pcase-exhaustive (msgpack-read-from-string
@@ -471,6 +472,20 @@
                          (nconc
                           (msgpack-list-pad-left (msgpack-unsigned-to-bits nanoseconds) 30 0)
                           (msgpack-list-pad-left (msgpack-unsigned-to-bits seconds) 34 0)))))
+      (`(,high ,low ,micro ,pico)
+       (should (= seconds (+ (* high (expt 2 16)) low)))
+       (should (= nanoseconds (+ (* 1000 micro) pico))))))
+  ;; equivalent arithmetic construction of the timestamp64 payload,
+  ;; from the same 32-bit halves the decoder reads
+  (let ((seconds 1584216254)
+        (nanoseconds 357957000))
+    (pcase-exhaustive (msgpack-read-from-string
+                       (msgpack-concat
+                        #xd7 -1
+                        (msgpack-unsigned-to-bytes
+                         (logior (ash nanoseconds 2) (ash seconds -32)) 4)
+                        (msgpack-unsigned-to-bytes
+                         (logand seconds #xffffffff) 4)))
       (`(,high ,low ,micro ,pico)
        (should (= seconds (+ (* high (expt 2 16)) low)))
        (should (= nanoseconds (+ (* 1000 micro) pico))))))
