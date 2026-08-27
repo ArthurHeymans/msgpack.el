@@ -721,15 +721,9 @@ The marker and precision follow `msgpack-float-type'."
 
 (defun msgpack-encode-array (array)
   "Return a MessagePack representation of ARRAY."
-  (with-temp-buffer
-    (set-buffer-multibyte nil)
-    (insert (msgpack--encode-count (length array) #x90 15 #xdc #xdd))
-    (if (vectorp array)
-        (cl-loop for item across array
-                 do (insert (msgpack-encode item)))
-      (dolist (item array)
-        (insert (msgpack-encode item))))
-    (buffer-string)))
+  (apply #'concat
+         (msgpack--encode-count (length array) #x90 15 #xdc #xdd)
+         (mapcar #'msgpack-encode array)))
 
 (defun msgpack-encode-list (list)
   "Encode LIST as MessagePack array or map accordingly."
@@ -740,13 +734,12 @@ The marker and precision follow `msgpack-float-type'."
 
 (defun msgpack-encode-alist (alist)
   "Encode ALIST as MessagePack map."
-  (with-temp-buffer
-    (set-buffer-multibyte nil)
-    (insert (msgpack--encode-count (length alist) #x80 15 #xde #xdf))
-    (cl-loop for (k . v) in alist
-             do (insert (msgpack-encode k))
-                (insert (msgpack-encode v)))
-    (buffer-string)))
+  (apply #'concat
+         (msgpack--encode-count (length alist) #x80 15 #xde #xdf)
+         (cl-mapcan (lambda (pair)
+                      (list (msgpack-encode (car pair))
+                            (msgpack-encode (cdr pair))))
+                    alist)))
 
 ;; `json--plist-to-alist'
 (defun msgpack-plist-to-alist (plist)
@@ -763,15 +756,13 @@ The marker and precision follow `msgpack-float-type'."
   (msgpack-encode-alist (msgpack-plist-to-alist plist)))
 
 (defun msgpack-encode-hash-table (table)
-  "Encode hash TABLE as MessagePack map without first building an alist."
-  (with-temp-buffer
-    (set-buffer-multibyte nil)
-    (insert (msgpack--encode-count (hash-table-count table) #x80 15 #xde #xdf))
+  "Encode hash TABLE as MessagePack map."
+  (let ((parts (list (msgpack--encode-count (hash-table-count table) #x80 15 #xde #xdf))))
     (maphash (lambda (key value)
-               (insert (msgpack-encode key))
-               (insert (msgpack-encode value)))
+               (push (msgpack-encode key) parts)
+               (push (msgpack-encode value) parts))
              table)
-    (buffer-string)))
+    (apply #'concat (nreverse parts))))
 
 (cl-defstruct (msgpack-bin (:constructor nil)
                            (:constructor msgpack-bin-make (string))

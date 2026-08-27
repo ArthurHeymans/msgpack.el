@@ -329,7 +329,10 @@
 
 (ert-deftest msgpack-encode-array ()
   (should (equal (msgpack-encode-array ()) (unibyte-string #x90)))
-  (should (equal (msgpack-encode-array '(1 2 3)) (unibyte-string #b10010011 1 2 3))))
+  (should (equal (msgpack-encode-array '(1 2 3)) (unibyte-string #b10010011 1 2 3)))
+  ;; nested containers
+  (should (equal (msgpack-encode-array (list (list 1 "a") (vector (msgpack-array-make nil))))
+                 (msgpack-concat #x92 #x92 1 #xa1 "a" #x91 #x90))))
 
 (ert-deftest msgpack-encode-alist ()
   (should (equal (msgpack-encode-alist ()) (unibyte-string #x80)))
