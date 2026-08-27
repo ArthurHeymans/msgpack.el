@@ -486,8 +486,8 @@ Usually this is 62, for 32-bit Emacs, it might be 30.")
 
 (defun msgpack-encode-string (string)
   "Return a MessagePack representation of UTF-8 STRING."
-  (let ((n (string-bytes string))
-        (s (encode-coding-string string 'utf-8)))
+  (let* ((s (encode-coding-string string 'utf-8))
+         (n (string-bytes s)))
     (cond
      ((<= n 31)
       (concat (unibyte-string (logior #b10100000 n)) s))
