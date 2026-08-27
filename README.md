@@ -59,6 +59,11 @@ use `:false-value` to override that per call.
 
 ### `msgpack-bin-type` (defaults to `string`)
 
+### `msgpack-float-type` (defaults to `float32`)
+
+Set to `float64` for lossless float encoding.  `float32` is the
+historical default and truncates to single precision.
+
 ## Requirements
 
 - Emacs 25.1

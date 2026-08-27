@@ -87,6 +87,13 @@ Must be either `string' for the historical raw unibyte string behavior or
 `msgpack-bin' for a lossless wrapper."
   :type '(choice (const string) (const msgpack-bin)))
 
+(defcustom msgpack-float-type 'float32
+  "Precision to encode floats with.
+Must be `float32' (the historical default, lossy) or `float64' for
+lossless encoding.  Consider let-binding this around your call to
+`msgpack-encode' instead of `setq'ing it."
+  :type '(choice (const float32) (const float64)))
+
 (defvar msgpack--read-false nil
   "Dynamically bound value used when reading MessagePack false.")
 
@@ -617,6 +624,55 @@ Usually this is 62, for 32-bit Emacs, it might be 30.")
              (logand (ash mantissa -8) #xff)
              (logand mantissa #xff)))))))))
 
+(defun msgpack-double-to-bytes (f)
+  "Convert float F to IEEE 754 double precision bytes.
+Needs a fixnum of at least 54 bits (any 64-bit Emacs) or bignum
+support (Emacs 27.1+)."
+  (when (and (< msgpack-emacs-integer-length 54) (< emacs-major-version 27))
+    (error "Encoding float64 requires Emacs 27.1+ or a 64-bit Emacs"))
+  (let* ((sign (cond ((= f 0.0) (if (= (/ 1.0 f) 1.0e+INF) 0 1))
+                     ((< f 0) 1)
+                     (t 0)))
+         (f (abs f)))
+    (cond
+     ((= f 0.0) (unibyte-string (ash sign 7) 0 0 0 0 0 0 0))
+     ((/= f f) (unibyte-string (logior (ash sign 7) #x7f) #xf8 0 0 0 0 0 0))
+     ((= f 1.0e+INF) (unibyte-string (logior (ash sign 7) #x7f) #xf0 0 0 0 0 0 0))
+     (t
+      (let ((e 0))
+        (while (>= f 18446744073709551616.0)  ; 2^64
+          (setq f (/ f 18446744073709551616.0))
+          (setq e (+ e 64)))
+        (while (< f 5.421010862427522e-20)    ; 2^-64
+          (setq f (* f 18446744073709551616.0))
+          (setq e (- e 64)))
+        (while (>= f 9007199254740992.0)      ; 2^53
+          (setq f (* f 0.5))
+          (setq e (1+ e)))
+        (while (< f 4503599627370496.0)       ; 2^52
+          (setq f (* f 2.0))
+          (setq e (1- e)))
+        ;; Now F is an integer-valued float in [2^52, 2^53) and
+        ;; |value| = F * 2^E, i.e. 1.mantissa * 2^(E + 52).
+        (let* ((frac-int (truncate f))
+               (biased (+ e 1075))
+               exp-field frac52)
+          (if (>= biased 1)
+              (setq exp-field biased
+                    frac52 (- frac-int #x10000000000000)) ; 2^52
+            ;; subnormal
+            (setq exp-field 0
+                  frac52 (ash frac-int (1- biased))))
+          (unibyte-string
+           (logior (ash sign 7) (ash exp-field -4))
+           (logior (ash (logand exp-field 15) 4) (ash frac52 -48))
+           (logand (ash frac52 -40) #xff)
+           (logand (ash frac52 -32) #xff)
+           (logand (ash frac52 -24) #xff)
+           (logand (ash frac52 -16) #xff)
+           (logand (ash frac52 -8) #xff)
+           (logand frac52 #xff))))))))
+
 (defun msgpack-bytes-to-hex-string (bytes)
   "Convert BYTES to a string representation.
 Each byte in BYTES is converted to its two-digit hexadecimal
@@ -633,8 +689,11 @@ in the result."
    ""))
 
 (defun msgpack-encode-float (f)
-  "Encode float F as MessagePack float."
-  (concat (unibyte-string #xca) (msgpack-float-to-bytes f)))
+  "Encode float F as MessagePack float.
+The marker and precision follow `msgpack-float-type'."
+  (pcase-exhaustive msgpack-float-type
+    ('float32 (concat (unibyte-string #xca) (msgpack-float-to-bytes f)))
+    ('float64 (concat (unibyte-string #xcb) (msgpack-double-to-bytes f)))))
 
 (defun msgpack--encode-count (count fixed-base fixed-max marker16 marker32)
   "Encode COUNT using fixed, 16-bit, or 32-bit MessagePack length prefixes."
