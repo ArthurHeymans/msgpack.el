@@ -242,7 +242,23 @@
   (should (equal (msgpack-float-to-bytes 1.7) (unibyte-string #x3f #xd9 #x99 #x9a)))
   (should (equal (msgpack-float-to-bytes 123.456) (unibyte-string #x42 #xf6 #xe9 #x79)))
   (should (equal (msgpack-float-to-bytes .9999999) (unibyte-string #x3f #x7f #xff #xfe)))
-  (should (equal (msgpack-bytes-to-hex-string (msgpack-float-to-bytes 3.14)) "4048f5c3")))
+  (should (equal (msgpack-bytes-to-hex-string (msgpack-float-to-bytes 3.14)) "4048f5c3"))
+  ;; zero, signed zero, infinity, and NaN
+  (should (equal (msgpack-float-to-bytes 0.0) (unibyte-string 0 0 0 0)))
+  (should (equal (msgpack-float-to-bytes -0.0) (unibyte-string #x80 0 0 0)))
+  (should (equal (msgpack-float-to-bytes 1.0e+INF) (unibyte-string #x7f #x80 0 0)))
+  (should (equal (msgpack-float-to-bytes -1.0e+INF) (unibyte-string #xff #x80 0 0)))
+  (should (equal (msgpack-float-to-bytes 0.0e+NaN) (unibyte-string #x7f #xc0 0 0)))
+  ;; subnormal and underflow
+  (should (equal (msgpack-float-to-bytes 1.0e-30) (unibyte-string #x0d #xa2 #x42 #x60)))
+  (should (equal (msgpack-float-to-bytes 5.0e-324) (unibyte-string 0 0 0 0)))
+  ;; round-trip: single precision keeps about 6 significant decimal digits
+  (cl-loop repeat 200
+           for f = (+ (- (random 1000000) 500000)
+                      (/ (random 1000000) 1000000.0))
+           do (should (< (/ (abs (- (msgpack-decode (msgpack-encode f)) f))
+                            (max (abs f) 1.0e-30))
+                         1.0e-6))))
 
 (ert-deftest msgpack-encode-array ()
   (should (equal (msgpack-encode-array ()) (unibyte-string #x90)))
@@ -279,6 +295,9 @@
   (should (equal (msgpack-bytes-to-hex-string (msgpack-encode :msgpack-false)) "c2"))
   (should (equal (msgpack-bytes-to-hex-string (msgpack-encode t)) "c3"))
   (should (equal (msgpack-encode t) (unibyte-string #xc3)))
+  ;; floats encode as floats, including zero (sign preserved for -0.0)
+  (should (equal (msgpack-encode 0.0) (unibyte-string #xca 0 0 0 0)))
+  (should (equal (msgpack-encode -0.0) (unibyte-string #xca #x80 0 0 0)))
   (should (equal (msgpack-encode '(("compact" . t) ("schema" . 0)))
                  (msgpack-concat #x82 #xa7 "compact" #xc3 #xa6 "schema" 0)))
   (should (equal (msgpack-encode #s(hash-table test equal size 2 data (compact t schema 0)))

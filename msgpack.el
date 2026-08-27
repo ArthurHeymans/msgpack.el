@@ -573,26 +573,49 @@ Usually this is 62, for 32-bit Emacs, it might be 30.")
   (cl-loop for i from 0 to (1- (length bits)) by 8
            concat (unibyte-string (msgpack-8bits-to-byte (cl-subseq bits i (+ i 8))))))
 
-;; Emacs float uses IEEE 64-bit but we can't access it from Emacs Lisp
-;; XXX File a feature request
+;; Emacs float is IEEE 754 64-bit, but Emacs Lisp offers no way to access
+;; its bits, so sign, exponent, and mantissa are extracted arithmetically.
 (defun msgpack-float-to-bytes (f)
-  "Convert float F to IEEE 32-bit."
-  ;; http://sandbox.mc.edu/~bennet/cs110/flt/dtof.html
-  (pcase-let* ((sign (if (< f 0) 1 0))
-               (f (abs f))
-               (`(,int ,frac) (msgpack-split-float-the-hard-way f))
-               (ibits (msgpack-unsigned-to-bits int))
-               (fbits (msgpack-float-to-bits frac 32)) ; XXX why 32?
-               (`(,bits ,e) (msgpack-float-to-bits-normalize ibits fbits))
-               (too-many (> (length bits) 23))
-               (mantissa (if too-many
-                             (cl-subseq bits 0 23)
-                           (msgpack-list-pad-right bits 23 0)))
-               (exponent (msgpack-list-pad-left (msgpack-unsigned-to-bits (+ e 127)) 8 0)))
-    (let ((bytes (msgpack-bits-to-bytes (append (list sign) exponent mantissa))))
-      (if (and too-many (= 1 (nth 23 bits)))
-          (msgpack-unsigned-to-bytes (1+ (msgpack-bytes-to-unsigned bytes)) 4)
-        bytes))))
+  "Convert float F to IEEE 754 single precision bytes."
+  (let* ((sign (cond ((= f 0.0) (if (= (/ 1.0 f) 1.0e+INF) 0 1))
+                     ((< f 0) 1)
+                     (t 0)))
+         (f (abs f)))
+    (cond
+     ((= f 0.0) (unibyte-string (ash sign 7) 0 0 0))
+     ((/= f f) (unibyte-string (logior (ash sign 7) #x7f) #xc0 0 0))
+     ((= f 1.0e+INF) (unibyte-string (logior (ash sign 7) #x7f) #x80 0 0))
+     (t
+      (let ((e 0))
+        (while (>= f 4294967296.0)          ; 2^32
+          (setq f (/ f 4294967296.0))
+          (setq e (+ e 32)))
+        (while (< f 2.3283064365386963e-10) ; 2^-32
+          (setq f (* f 4294967296.0))
+          (setq e (- e 32)))
+        (while (>= f 2.0)
+          (setq f (* f 0.5))
+          (setq e (1+ e)))
+        (while (< f 1.0)
+          (setq f (* f 2.0))
+          (setq e (1- e)))
+        ;; Now F is in [1, 2) and E is the unbiased exponent.
+        (let (exp-field mantissa)
+          (if (>= e -126)
+              (setq exp-field (+ e 127)
+                    mantissa (round (* (- f 1.0) 8388608.0))) ; 2^23
+            (setq exp-field 0
+                  mantissa (round (* f (expt 2.0 (+ e 149))))))
+          (when (= mantissa 8388608)    ; 2^23, rounded up to the next power of 2
+            (setq mantissa 0)
+            (setq exp-field (if (zerop exp-field) 1 (1+ exp-field))))
+          (if (> exp-field 254)         ; overflow to infinity
+              (unibyte-string (logior (ash sign 7) #x7f) #x80 0 0)
+            (unibyte-string
+             (logior (ash sign 7) (ash exp-field -1))
+             (logior (ash (logand exp-field 1) 7) (ash mantissa -16))
+             (logand (ash mantissa -8) #xff)
+             (logand mantissa #xff)))))))))
 
 (defun msgpack-bytes-to-hex-string (bytes)
   "Convert BYTES to a string representation.
@@ -732,7 +755,6 @@ Use it if you need to write MessagePack byte array."
     ('t (unibyte-string #xc3))
     ;; integer, float
     ((pred integerp) (msgpack-encode-integer obj))
-    ((and (pred floatp) (pred zerop)) (msgpack-encode-integer 0))
     ((pred floatp) (msgpack-encode-float obj))
     ;; string, byte array
     ((pred stringp) (msgpack-encode-string obj))
