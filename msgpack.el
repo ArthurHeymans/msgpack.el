@@ -29,7 +29,6 @@
 
 (require 'json)                         ; `json-alist-p'
 (require 'cl-lib)
-(require 'seq)                          ; `seq-partition'
 
 (defgroup msgpack nil
   "MessagePack encoder and decoder."
@@ -108,19 +107,6 @@ lossless encoding.  Consider let-binding this around your call to
     (forward-char amt)
     (buffer-substring-no-properties op (point))))
 
-(defun msgpack-byte-to-bits (byte)
-  "Convert 1 BYTE to a list of 8 bits."
-  (cl-loop for i from 7 downto 0
-           collect (if (= (logand byte (expt 2 i)) 0)
-                       0
-                     1)))
-
-(defun msgpack-bits-to-unsigned (bits)
-  "Convert BITS to unsigned."
-  (cl-loop for i from (1- (length bits)) downto 0
-           for b in bits
-           sum (* b (expt 2 i))))
-
 (defun msgpack-bytes-to-unsigned (bytes)
   "Convert BYTES to unsigned int."
   (let ((n 0))
@@ -146,10 +132,6 @@ lossless encoding.  Consider let-binding this around your call to
 (defun msgpack-byte-to-signed (byte)
   "Convert BYTE to signed int."
   (if (< byte 128) byte (- byte 256)))
-
-(defun msgpack-bytes-to-bits (bytes)
-  "Convert BYTES to bits."
-  (cl-mapcan #'msgpack-byte-to-bits bytes))
 
 (defun msgpack-bytes-to-float (bytes)
   "Convert BYTES (4 bytes, IEEE 754 single precision) to a float."
@@ -531,51 +513,6 @@ Usually this is 62, for 32-bit Emacs, it might be 30.")
         (setq n next))
       bits)))
 
-(defun msgpack-split-float (f)
-  "Split float F into integral and fractional parts."
-  (let ((integral (truncate f)))
-    (list integral
-          ;; (- 1.1 1)
-          ;; => 0.10000000000000009
-          ;; https://0.30000000000000004.com/
-          (- f integral))))
-
-(defun msgpack-split-float-the-hard-way (f)
-  "Split float F into integral and fractional parts."
-  (let* ((s (prin1-to-string f))
-         (pos (cl-position ?. s)))
-    (list (car (read-from-string s 0 pos))
-          (car (read-from-string s pos)))))
-
-(defun msgpack-float-to-bits (f limit)
-  "Convert float F to at most LIMIT bits."
-  (let (bits double (n 0))
-    (while (and (not (zerop f)) (< n limit))
-      (setq double (* f 2))
-      (cond
-       ((>= double 1)
-        (push 1 bits)
-        (setq f (1- double)))
-       (t
-        (push 0 bits)
-        (setq f double)))
-      (cl-incf n))
-    (nreverse bits)))
-
-(defun msgpack-float-to-bits-normalize (ibits fbits)
-  "Normalize IBITS and FBITS and return a list of bits."
-  (let* ((index (length ibits))
-         (bits (append ibits fbits))
-         (e (1- (- (length ibits) (cl-position 1 bits)))))
-    (setq index (- index e))
-    (list (cl-subseq bits index) e)))
-
-(defun msgpack-list-pad-right (list len padding)
-  "If LIST is shorter than LEN, pad it with PADDING on the right."
-  (pcase (- len (length list))
-    ((and (pred (< 0)) diff) (append list (make-list diff padding)))
-    (_ list)))
-
 (defun msgpack-list-pad-left (list len padding)
   "If LIST is shorter than LEN, pad it with PADDING on the left."
   (pcase (- len (length list))
@@ -693,15 +630,6 @@ Each byte in BYTES is converted to its two-digit hexadecimal
 representation in the resulting string."
   (mapconcat (lambda (b) (format "%x" b)) bytes ""))
 
-(defun msgpack-hex-string-to-bytes (string)
-  "Convert STRING to BYTES.
-Each pair of characters in STRING is converted to a single byte
-in the result."
-  (mapconcat
-   (lambda (s) (unibyte-string (string-to-number s 16)))
-   (seq-partition string 2)
-   ""))
-
 (defun msgpack-encode-float (f)
   "Encode float F as MessagePack float.
 The marker and precision follow `msgpack-float-type'."
@@ -782,12 +710,6 @@ Use it if you need to write MessagePack byte array."
                            (:copier nil))
   "Wrapper forcing PAIRS to encode as a MessagePack map."
   pairs)
-
-(defun msgpack-string-pad-right (s len padding)
-  "If S is shorter than LEN, pad it with PADDING on the right."
-  (if (< (length s) len)
-      (concat s (make-string (- len (length s)) padding))
-    s))
 
 (defun msgpack-encode-ext (ext)
   "Encode EXT as MessagePack ext."
