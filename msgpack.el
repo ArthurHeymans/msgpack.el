@@ -151,36 +151,41 @@ lossless encoding.  Consider let-binding this around your call to
   "Convert BYTES to bits."
   (cl-mapcan #'msgpack-byte-to-bits bytes))
 
-(defun msgpack--bytes-to-ieee-float (bytes exponent-bits fraction-bits bias)
-  "Convert IEEE 754 BYTES to a floating-point number.
-EXPONENT-BITS, FRACTION-BITS, and BIAS describe the float format."
-  (let* ((bits (msgpack-bytes-to-bits bytes))
-         (sign (if (zerop (car bits)) 1.0 -1.0))
-         (exponent-end (1+ exponent-bits))
-         (exponent (msgpack-bits-to-unsigned (cl-subseq bits 1 exponent-end)))
-         (max-exponent (1- (expt 2 exponent-bits)))
-         (fraction (msgpack-bits-to-unsigned (cl-subseq bits exponent-end))))
+(defun msgpack-bytes-to-float (bytes)
+  "Convert BYTES (4 bytes, IEEE 754 single precision) to a float."
+  (let* ((b0 (aref bytes 0))
+         (b1 (aref bytes 1))
+         (sign (if (zerop (logand b0 #x80)) 1.0 -1.0))
+         (biased (+ (* (logand b0 #x7f) 2) (ash b1 -7)))
+         (fraction (+ (* (logand b1 #x7f) #x10000)
+                      (msgpack-bytes-to-unsigned (substring bytes 2 4)))))
     (cond
-     ((= exponent max-exponent)
-      (if (zerop fraction)
-          (* sign (/ 1.0 0.0))
-        (/ 0.0 0.0)))
-     ((zerop exponent)
+     ((= biased 255) (if (zerop fraction) (* sign (/ 1.0 0.0)) (/ 0.0 0.0)))
+     ((zerop biased)
       (if (zerop fraction)
           (* sign 0.0)
-        (* sign fraction (expt 2.0 (- 1 bias fraction-bits)))))
-     (t
-      (* sign
-         (+ 1.0 (/ (float fraction) (expt 2.0 fraction-bits)))
-         (expt 2.0 (- exponent bias)))))))
-
-(defun msgpack-bytes-to-float (bytes)
-  "Convert BYTES to IEEE 754 float."
-  (msgpack--bytes-to-ieee-float bytes 8 23 127))
+        (* sign (float fraction) (expt 2.0 -149))))
+     (t (* sign
+           (+ 1.0 (/ (float fraction) 8388608.0)) ; 2^23
+           (expt 2.0 (- biased 127)))))))
 
 (defun msgpack-bytes-to-double (bytes)
-  "Convert BYTES to IEEE 754 double."
-  (msgpack--bytes-to-ieee-float bytes 11 52 1023))
+  "Convert BYTES (8 bytes, IEEE 754 double precision) to a float."
+  (let* ((b0 (aref bytes 0))
+         (b1 (aref bytes 1))
+         (sign (if (zerop (logand b0 #x80)) 1.0 -1.0))
+         (biased (+ (* (logand b0 #x7f) 16) (ash b1 -4)))
+         (fraction (+ (* (logand b1 #x0f) #x1000000000000) ; 2^48
+                      (msgpack-bytes-to-unsigned (substring bytes 2 8)))))
+    (cond
+     ((= biased 2047) (if (zerop fraction) (* sign (/ 1.0 0.0)) (/ 0.0 0.0)))
+     ((zerop biased)
+      (if (zerop fraction)
+          (* sign 0.0)
+        (* sign (float fraction) (expt 2.0 -1074))))
+     (t (* sign
+           (+ 1.0 (/ (float fraction) 4503599627370496.0)) ; 2^52
+           (expt 2.0 (- biased 1023)))))))
 
 (defun msgpack-concat (&rest args)
   "Concatenate all the arguments ARGS and make the result a unibyte string."

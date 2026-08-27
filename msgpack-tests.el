@@ -260,6 +260,35 @@
                             (max (abs f) 1.0e-30))
                          1.0e-6))))
 
+(ert-deftest msgpack-bytes-to-float ()
+  (should (equal (msgpack-bytes-to-float (unibyte-string #x3e #x20 #x00 #x00)) 0.15625))
+  ;; infinity, NaN, signed zero, and subnormal
+  (should (= (msgpack-bytes-to-float (unibyte-string #x7f #x80 0 0)) 1.0e+INF))
+  (should (= (msgpack-bytes-to-float (unibyte-string #xff #x80 0 0)) -1.0e+INF))
+  (should (/= (msgpack-bytes-to-float (unibyte-string #x7f #xc0 0 0))
+              (msgpack-bytes-to-float (unibyte-string #x7f #xc0 0 0))))
+  (should (equal (msgpack-bytes-to-float (unibyte-string #x80 0 0 0)) -0.0))
+  (should (= (msgpack-bytes-to-float (unibyte-string 0 #x80 0 0)) 1.1754943508222875e-38))
+  ;; round-trip against the encoder
+  (cl-loop repeat 200
+           for f = (+ (- (random 1000000) 500000)
+                      (/ (random 1000000) 1000000.0))
+           do (should (= (msgpack-bytes-to-float (msgpack-float-to-bytes f))
+                         (msgpack-decode (msgpack-encode f))))))
+
+(ert-deftest msgpack-bytes-to-double ()
+  (should (equal (msgpack-bytes-to-double (msgpack-double-to-bytes 1.1)) 1.1))
+  (should (= (msgpack-bytes-to-double (unibyte-string #x7f #xf0 0 0 0 0 0 0)) 1.0e+INF))
+  (should (/= (msgpack-bytes-to-double (unibyte-string #x7f #xf8 0 0 0 0 0 0))
+              (msgpack-bytes-to-double (unibyte-string #x7f #xf8 0 0 0 0 0 0))))
+  (should (equal (msgpack-bytes-to-double (unibyte-string #x80 0 0 0 0 0 0 0)) -0.0))
+  (should (= (msgpack-bytes-to-double (unibyte-string 0 0 0 0 0 0 0 1)) 5.0e-324))
+  ;; round-trip against the encoder
+  (cl-loop repeat 200
+           for f = (+ (- (random 1000000) 500000)
+                      (/ (random 1000000) 1000000.0))
+           do (should (= (msgpack-bytes-to-double (msgpack-double-to-bytes f)) f))))
+
 (ert-deftest msgpack-double-to-bytes ()
   (should (equal (msgpack-double-to-bytes 1.0)
                  (unibyte-string #x3f #xf0 0 0 0 0 0 0)))
