@@ -386,6 +386,7 @@
 
 (ert-deftest msgpack-try-read ()
   (should (progn (msgpack-try-read-from-string "\xa5hello") t))
+  (should-error (msgpack-try-read-from-string "\xc1") :type 'error)
   (should-error (msgpack-try-read-from-string "\xa5hell") :type 'end-of-buffer)
   (should-error (msgpack-try-read-from-string
                  (msgpack-concat

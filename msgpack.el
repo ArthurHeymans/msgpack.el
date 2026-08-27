@@ -861,7 +861,7 @@ MessagePack object is completed."
      (t
       (pcase b
         (#xc0)
-        (#xc1)
+        (#xc1 (error "Never used: #xc1"))
         (#xc2)
         (#xc3)
         (#xcc (msgpack-read-bytes 1))
