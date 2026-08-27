@@ -456,6 +456,16 @@ Usually this is 62, for 32-bit Emacs, it might be 30.")
       (msgpack-signed-to-bytes-fallback integer size)
     (msgpack-unsigned-to-bytes integer size)))
 
+;; Bounds used by the encoders.  On Emacs older than 27.1 the 2^63 and
+;; 2^64 values wrap to 0, so the 64-bit ranges below clamp to the
+;; fixnum range via max/min, matching the pre-bignum behavior.
+(defconst msgpack--2^15 (expt 2 15))
+(defconst msgpack--2^16 (expt 2 16))
+(defconst msgpack--2^31 (expt 2 31))
+(defconst msgpack--2^32 (expt 2 32))
+(defconst msgpack--2^63 (expt 2 63))
+(defconst msgpack--2^64 (expt 2 64))
+
 (defun msgpack-encode-integer (n)
   "Return a MessagePack representation of integer N."
   (cond
@@ -467,24 +477,19 @@ Usually this is 62, for 32-bit Emacs, it might be 30.")
     (unibyte-string #xcc n))
    ((<= 0 n #xffff)
     (concat (unibyte-string #xcd) (msgpack-unsigned-to-bytes n 2)))
-   ;; NOTE #xffffffff or 2^32 overflow for 32-bit platform
    ((<= 0 n #xffffffff)
     (concat (unibyte-string #xce) (msgpack-unsigned-to-bytes n 4)))
-   ((or (and (> (expt 2 64) 0)          ; need Emacs 27.1's bignum
-             (<= 0 n (1- (expt 2 64))))
-        (<= 0 n (max (1- (expt 2 64)) most-positive-fixnum)))
+   ((<= 0 n (max (1- msgpack--2^64) most-positive-fixnum))
     (concat (unibyte-string #xcf) (msgpack-unsigned-to-bytes n 8)))
    ((<= -128 n 127)
     (concat (unibyte-string #xd0) (msgpack-signed-to-bytes n 1)))
-   ((<= (- (expt 2 15)) n (1- (expt 2 15)))
+   ((<= (- msgpack--2^15) n (1- msgpack--2^15))
     (concat (unibyte-string #xd1) (msgpack-signed-to-bytes n 2)))
-   ((<= (- (expt 2 31)) n (1- (expt 2 31)))
+   ((<= (- msgpack--2^31) n (1- msgpack--2^31))
     (concat (unibyte-string #xd2) (msgpack-signed-to-bytes n 4)))
-   ((or (and (> (expt 2 63) 0)          ; need Emacs 27.1's bignum
-             (<= (- (expt 2 63)) n (1- (expt 2 63))))
-        (<= (min most-negative-fixnum (- (expt 2 63)))
-            n
-            (max most-positive-fixnum (1- (expt 2 63)))))
+   ((<= (min (- msgpack--2^63) most-negative-fixnum)
+        n
+        (max (1- msgpack--2^63) most-positive-fixnum))
     (concat (unibyte-string #xd3) (msgpack-signed-to-bytes n 8)))
    (t (error "Should be impossible to reach here: %s" n))))
 
@@ -497,9 +502,9 @@ Usually this is 62, for 32-bit Emacs, it might be 30.")
       (concat (unibyte-string (logior #b10100000 n)) s))
      ((<= n #xff)
       (concat (unibyte-string #xd9) (msgpack-unsigned-to-bytes n 1) s))
-     ((<= n (1- (expt 2 16)))
+     ((<= n (1- msgpack--2^16))
       (concat (unibyte-string #xda) (msgpack-unsigned-to-bytes n 2) s))
-     ((<= n (1- (expt 2 32)))
+     ((<= n (1- msgpack--2^32))
       (concat (unibyte-string #xdb) (msgpack-unsigned-to-bytes n 4) s)))))
 
 (defun msgpack-encode-unibyte-string (string)
@@ -512,7 +517,7 @@ Usually this is 62, for 32-bit Emacs, it might be 30.")
       (concat (unibyte-string #xc4) (msgpack-unsigned-to-bytes n 1) s))
      ((<= n #xffff)
       (concat (unibyte-string #xc5) (msgpack-unsigned-to-bytes n 2) s))
-     ((<= n (1- (expt 2 32)))
+     ((<= n (1- msgpack--2^32))
       (concat (unibyte-string #xc6) (msgpack-unsigned-to-bytes n 4) s)))))
 
 (defun msgpack-unsigned-to-bits (n)
@@ -711,7 +716,7 @@ The marker and precision follow `msgpack-float-type'."
     (unibyte-string (logior fixed-base count)))
    ((<= count #xffff)
     (concat (unibyte-string marker16) (msgpack-unsigned-to-bytes count 2)))
-   ((<= count (1- (expt 2 32)))
+   ((<= count (1- msgpack--2^32))
     (concat (unibyte-string marker32) (msgpack-unsigned-to-bytes count 4)))))
 
 (defun msgpack-encode-array (array)
