@@ -9,16 +9,18 @@ jobs:
       matrix:
         emacs_version:
           - 25.1
-          - 25.3
-          - 26.1
           - 26.3
+          - 27.2
+          - 28.2
+          - 29.4
+          - 30.2
           - snapshot
     steps:
-    - uses: purcell/setup-emacs@master
+    - uses: purcell/setup-emacs@v8.0
       with:
         version: ${{ matrix.emacs_version }}
 
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
     - name: Byte compile
       run: 'emacs -Q --batch --eval "(setq byte-compile-error-on-warn t)" -f batch-byte-compile msgpack.el'
     - name: Run tests
@@ -27,11 +29,11 @@ jobs:
   conformance:
     runs-on: ubuntu-latest
     steps:
-    - uses: purcell/setup-emacs@master
+    - uses: purcell/setup-emacs@v8.0
       with:
-        version: 29.4
+        version: 30.2
 
-    - uses: actions/checkout@v4
+    - uses: actions/checkout@v7
     - name: Download conformance suite
       run: |
         curl -fsSL \
